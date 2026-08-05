@@ -4,6 +4,11 @@ Adding, removing, or draining machines in a storage cluster can require replicat
 
 ShardFlow computes these placements deterministically. It models the problem as min-cost flow, first minimizing replica movement and then the sum of squared node loads. Every result carries a certificate. A successful placement includes vertex potentials certifying optimality, while an infeasible result includes a cut proving that no valid placement exists. `Verify` checks either certificate without rerunning the optimizer.
 
+![Shard placement as min-cost flow](./assets/diagram.png)
+
+*Figure 1: Shard placement as min-cost flow*  
+*One shard slice, one replica in blue. 3 slots shown, load pooled across shards.*
+
 ## Overview
 
 The planner receives:
