@@ -1,7 +1,7 @@
 // Package shardflow solves cluster rebalancing as min-cost flow. It places
 // replicated shards under capacity and failure-domain constraints, minimizing
 // data movement before load concentration. Placement is deterministic.
-// 
+//
 // Every result carries a proof. A solution includes vertex potentials making
 // residual edge costs nonnegative, certifying optimality. An infeasible result
 // includes a source-side cut with capacity below the number of required replicas.
@@ -107,6 +107,8 @@ func verifySolution(graph *network, shape *layout, in *instance, result Solution
 	if objective != result.Objective {
 		return fmt.Errorf("objective is %+v, want %+v", result.Objective, objective)
 	}
+	// Reconstruct the claimed flow in the fresh network. Its residual edges
+	// depend only on the inputs and claimed placement, not on solver state.
 	if err := applyPlacement(graph, shape, in, selected, loads); err != nil {
 		return fmt.Errorf("reconstruct flow: %w", err)
 	}
@@ -145,6 +147,8 @@ func buildNetwork(in *instance) (*network, *layout, error) {
 		return nil, nil, err
 	}
 
+	// Vertices occupy contiguous ranges for shards, shard-domain pairs, and
+	// nodes. Their positions are stable because normalize sorts every input.
 	shape := &layout{
 		source:      0,
 		sink:        vertices - 1,
@@ -183,6 +187,8 @@ func buildNetwork(in *instance) (*network, *layout, error) {
 	for shard := range in.shards {
 		for node, item := range in.nodes {
 			if item.Capacity == 0 {
+				// Omitting this choice models a drain while still allowing the
+				// node to appear in the old placement.
 				continue
 			}
 			domainVertex := domainBase +
@@ -200,8 +206,8 @@ func buildNetwork(in *instance) (*network, *layout, error) {
 	}
 
 	for node, item := range in.nodes {
-		// Failure-domain separation lets one node hold at most one replica of
-		// each shard, regardless of its advertised capacity.
+		// Each shard reaches a node through one unit-capacity choice edge, so a
+		// node holds at most one replica per shard regardless of its capacity.
 		slots := min(item.Capacity, len(in.shards))
 		shape.slotEdges[node] = make([]edgeRef, 0, slots)
 		for slot := 1; slot <= slots; slot++ {
@@ -222,7 +228,10 @@ func augment(graph *network, source, sink, required int) (int, []bool, error) {
 	// Dijkstra needs nonnegative edge costs and comparisons that addition
 	// preserves. Lexicographic Cost values provide the ordering, while vertex
 	// potentials keep residual-edge costs nonnegative.
+	// Original forward costs are nonnegative, so zero initial potentials work.
 	potential := make([]Cost, len(graph.adj))
+	// Every augmenting path contains a unit-capacity edge, so one iteration
+	// places exactly one replica.
 	for flow := 0; flow < required; flow++ {
 		distance := make([]Cost, len(graph.adj))
 		reached := make([]bool, len(graph.adj))
@@ -266,8 +275,12 @@ func augment(graph *network, source, sink, required int) (int, []bool, error) {
 			}
 		}
 		if !reached[sink] {
+			// With no augmenting path, the reached vertices form the source
+			// side of a cut that bounds every possible placement.
 			return flow, reached, nil
 		}
+		// No positive-capacity edge leaves the reached set, and augmentation adds
+		// capacity only within it. Stale potentials outside the set are never used.
 		for vertex, ok := range reached {
 			if !ok {
 				continue
@@ -296,6 +309,9 @@ func certificatePotentials(graph *network) ([]Cost, error) {
 	// The search updates potentials only for vertices reachable from the source.
 	// Verify checks every residual edge, including disconnected components, so
 	// compute a fresh potential assignment for the entire graph.
+	// Initializing every distance to zero acts like a temporary zero-cost source
+	// connected to every vertex. Once relaxation converges, no residual edge can
+	// lower a destination distance, so every reduced cost is nonnegative.
 	distance := make([]Cost, len(graph.adj))
 	for pass := 0; pass < len(graph.adj); pass++ {
 		changed := false

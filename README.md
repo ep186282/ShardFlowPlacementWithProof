@@ -1,6 +1,8 @@
 # ShardFlow: Shard Placement with Checkable Proofs
 
-ShardFlow addresses a practical systems problem: redistributing replicated data when machines are added, removed, or drained without causing unnecessary movement or concentrating load. ShardFlow models this problem as min-cost flow, using shortest-path optimization to find the best placement and using the max-flow min-cut theorem to prove when no valid placement exists. The planner respects capacity and failure-domain constraints, prioritizes preserving existing replicas, and produces deterministic results. Each result includes a compact certificate that `Verify` checks without rerunning the optimizer.
+Adding, removing, or draining machines in a storage cluster can require replicated data to move. A good planner must restore every required replica without overloading nodes, placing two copies in the same failure domain, or moving more replicas than necessary.
+
+ShardFlow computes these placements deterministically. It models the problem as min-cost flow, first minimizing replica movement and then the sum of squared node loads. Every result carries a certificate. A successful placement includes vertex potentials certifying optimality, while an infeasible result includes a cut proving that no valid placement exists. `Verify` checks either certificate without rerunning the optimizer.
 
 ## Overview
 
