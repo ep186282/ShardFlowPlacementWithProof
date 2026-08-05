@@ -42,6 +42,7 @@ func Place(nodes []Node, shards []Shard, old Placement) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The final reachable set gives a cut proving that the required flow is impossible.
 	if flow != in.total {
 		capacity, err := cutCapacity(graph, reached)
 		if err != nil {
@@ -119,7 +120,7 @@ func verifySolution(graph *network, shape *layout, in *instance, result Solution
 
 	// Any other complete placement changes this flow along residual cycles.
 	// Potentials cancel around each cycle, so nonnegative reduced costs prove
-	// that none of those changes can lower the objective.
+	// none of those changes can lower the objective.
 	for from, edges := range graph.adj {
 		for _, edge := range edges {
 			if edge.cap == 0 {
@@ -182,13 +183,12 @@ func buildNetwork(in *instance) (*network, *layout, error) {
 	}
 
 	// Each unit of flow chooses one shard, one failure domain, one node, and
-	// one slot. The shard-to-domain capacity prevents two replicas of the same
-	// shard from entering one failure domain.
+	// one slot. Capacity 1 on each shard-to-domain edge keeps two replicas of
+	// the same shard from sharing a failure domain.
 	for shard := range in.shards {
 		for node, item := range in.nodes {
 			if item.Capacity == 0 {
-				// Omitting this choice models a drain while still allowing the
-				// node to appear in the old placement.
+				// Capacity 0 drains a node, but old placements may still name it.
 				continue
 			}
 			domainVertex := domainBase +
@@ -225,10 +225,8 @@ func buildNetwork(in *instance) (*network, *layout, error) {
 }
 
 func augment(graph *network, source, sink, required int) (int, []bool, error) {
-	// Dijkstra needs nonnegative edge costs and comparisons that addition
-	// preserves. Lexicographic Cost values provide the ordering, while vertex
-	// potentials keep residual-edge costs nonnegative.
-	// Original forward costs are nonnegative, so zero initial potentials work.
+	// Lexicographic Cost gives Dijkstra an order preserved by addition. Potentials
+	// keep reduced costs nonnegative, and zero potentials are initially valid.
 	potential := make([]Cost, len(graph.adj))
 	// Every augmenting path contains a unit-capacity edge, so one iteration
 	// places exactly one replica.
@@ -306,12 +304,8 @@ func augment(graph *network, source, sink, required int) (int, []bool, error) {
 }
 
 func certificatePotentials(graph *network) ([]Cost, error) {
-	// The search updates potentials only for vertices reachable from the source.
-	// Verify checks every residual edge, including disconnected components, so
-	// compute a fresh potential assignment for the entire graph.
-	// Initializing every distance to zero acts like a temporary zero-cost source
-	// connected to every vertex. Once relaxation converges, no residual edge can
-	// lower a destination distance, so every reduced cost is nonnegative.
+	// Bellman-Ford finds potentials for every residual component, making all
+	// reduced costs nonnegative.
 	distance := make([]Cost, len(graph.adj))
 	for pass := 0; pass < len(graph.adj); pass++ {
 		changed := false
