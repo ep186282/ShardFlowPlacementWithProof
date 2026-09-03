@@ -256,6 +256,37 @@ func TestVerifierRejectsSuboptimalPlacement(t *testing.T) {
 	}
 }
 
+// A feasible instance has no proof of infeasibility. Verify must recompute
+// each claim rather than trust the certificate's own fields.
+func TestVerifierRejectsForgedCuts(t *testing.T) {
+	nodes := []sf.Node{{ID: "a", Domain: "east", Capacity: 1}}
+	shards := []sf.Shard{{ID: "x", Replicas: 1}}
+	result, err := sf.Place(nodes, shards, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vertices := len(requireSolution(t, result).Potentials)
+	allVertices := make([]int, vertices)
+	for index := range allVertices {
+		allVertices[index] = index
+	}
+
+	// A cut containing the sink has no outgoing edges.
+	forged := map[string]sf.Infeasible{
+		"sink inside cut": {Cut: allVertices, RequiredFlow: 1, CutCapacity: 0},
+		"inflated flow":   {Cut: []int{0}, RequiredFlow: 2, CutCapacity: 1},
+		"out of range":    {Cut: []int{0, vertices}, RequiredFlow: 1, CutCapacity: 1},
+		"negative index":  {Cut: []int{0, -1}, RequiredFlow: 1, CutCapacity: 1},
+	}
+	for name, proof := range forged {
+		t.Run(name, func(t *testing.T) {
+			if err := sf.Verify(nodes, shards, nil, proof); err == nil {
+				t.Fatal("Verify accepted forged cut")
+			}
+		})
+	}
+}
+
 func TestRemovedOldNodeIsValid(t *testing.T) {
 	nodes := []sf.Node{{ID: "live", Domain: "rack", Capacity: 1}}
 	shards := []sf.Shard{{ID: "x", Replicas: 1}}
