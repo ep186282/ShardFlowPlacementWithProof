@@ -205,6 +205,57 @@ func TestVerifierRejectsMutations(t *testing.T) {
 	}
 }
 
+// Moving one alpha replica to d trades a move for lower concentration. This
+// placement passes structural checks, so only reduced costs can reject it.
+func TestVerifierRejectsSuboptimalPlacement(t *testing.T) {
+	nodes := []sf.Node{
+		{ID: "a", Domain: "rack-1", Capacity: 2},
+		{ID: "b", Domain: "rack-2", Capacity: 2},
+		{ID: "c", Domain: "rack-3", Capacity: 2},
+		{ID: "d", Domain: "rack-4", Capacity: 2},
+	}
+	shards := []sf.Shard{
+		{ID: "alpha", Replicas: 2},
+		{ID: "beta", Replicas: 2},
+		{ID: "gamma", Replicas: 2},
+	}
+	old := sf.Placement{
+		{Shard: "alpha", Nodes: []sf.NodeID{"a", "b"}},
+		{Shard: "beta", Nodes: []sf.NodeID{"a", "c"}},
+		{Shard: "gamma", Nodes: []sf.NodeID{"b", "c"}},
+	}
+	result, err := sf.Place(nodes, shards, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	solution := requireSolution(t, result)
+	want := sf.Cost{Moves: 0, Concentration: 12}
+	if solution.Objective != want {
+		t.Fatalf("objective is %+v, want %+v", solution.Objective, want)
+	}
+
+	suboptimal := cloneSolution(solution)
+	suboptimal.Placement = sf.Placement{
+		{Shard: "alpha", Nodes: []sf.NodeID{"b", "d"}},
+		{Shard: "beta", Nodes: []sf.NodeID{"a", "c"}},
+		{Shard: "gamma", Nodes: []sf.NodeID{"b", "c"}},
+	}
+	suboptimal.Objective = sf.Cost{Moves: 1, Concentration: 10}
+	if err := sf.Verify(nodes, shards, old, suboptimal); err == nil {
+		t.Fatal("Verify accepted suboptimal placement")
+	}
+
+	// Zero potentials have the right length but leave the reverse arc of every
+	// used slot edge with negative reduced cost.
+	zeroPotentials := cloneSolution(solution)
+	for index := range zeroPotentials.Potentials {
+		zeroPotentials.Potentials[index] = sf.Cost{}
+	}
+	if err := sf.Verify(nodes, shards, old, zeroPotentials); err == nil {
+		t.Fatal("Verify accepted zero potentials")
+	}
+}
+
 func TestRemovedOldNodeIsValid(t *testing.T) {
 	nodes := []sf.Node{{ID: "live", Domain: "rack", Capacity: 1}}
 	shards := []sf.Shard{{ID: "x", Replicas: 1}}
